@@ -6,6 +6,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/helpers"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/logging"
 	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
 	"github.com/prysmaticlabs/prysm/v5/monitoring/tracing/trace"
 	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
@@ -41,9 +42,11 @@ func (s *Service) OnAttestation(ctx context.Context, a ethpb.Att, disparity time
 	defer span.End()
 
 	if err := helpers.ValidateNilAttestation(a); err != nil {
+		logging.AttestationLoggerInstance.Failure(ctx, err.Error(), a.GetData().Slot+1)
 		return err
 	}
 	if err := helpers.ValidateSlotTargetEpoch(a.GetData()); err != nil {
+		logging.AttestationLoggerInstance.Failure(ctx, err.Error(), a.GetData().Slot+1)
 		return err
 	}
 	tgt := a.GetData().Target.Copy()
@@ -56,6 +59,7 @@ func (s *Service) OnAttestation(ctx context.Context, a ethpb.Att, disparity time
 	// save it to the cache.
 	baseState, err := s.getAttPreState(ctx, tgt)
 	if err != nil {
+		logging.AttestationLoggerInstance.Failure(ctx, err.Error(), a.GetData().Slot+1)
 		return err
 	}
 
@@ -63,12 +67,14 @@ func (s *Service) OnAttestation(ctx context.Context, a ethpb.Att, disparity time
 
 	// Verify attestation target is from current epoch or previous epoch.
 	if err := verifyAttTargetEpoch(ctx, genesisTime, uint64(time.Now().Add(disparity).Unix()), tgt); err != nil {
+		logging.AttestationLoggerInstance.Failure(ctx, err.Error(), a.GetData().Slot+1)
 		return err
 	}
 
 	// Verify attestation beacon block is known and not from the future.
 	if err := s.verifyBeaconBlock(ctx, a.GetData()); err != nil {
-		return errors.Wrap(err, "could not verify attestation beacon block")
+		logging.AttestationLoggerInstance.Failure(ctx, errors.Wrap(err, "could not verify attestation beacon block").Error(), a.GetData().Slot+1)
+		return err
 	}
 
 	// Note that LMD GHOST and FFG consistency check is ignored because it was performed in sync's validation pipeline:
@@ -76,19 +82,23 @@ func (s *Service) OnAttestation(ctx context.Context, a ethpb.Att, disparity time
 
 	// Verify attestations can only affect the fork choice of subsequent slots.
 	if err := slots.VerifyTime(genesisTime, a.GetData().Slot+1, disparity); err != nil {
+		logging.AttestationLoggerInstance.Failure(ctx, err.Error(), a.GetData().Slot+1)
 		return err
 	}
 
 	// Use the target state to verify attesting indices are valid.
 	committees, err := helpers.AttestationCommittees(ctx, baseState, a)
 	if err != nil {
+		logging.AttestationLoggerInstance.Failure(ctx, err.Error(), a.GetData().Slot+1)
 		return err
 	}
 	indexedAtt, err := attestation.ConvertToIndexed(ctx, a, committees...)
 	if err != nil {
+		logging.AttestationLoggerInstance.Failure(ctx, err.Error(), a.GetData().Slot+1)
 		return err
 	}
 	if err := attestation.IsValidAttestationIndices(ctx, indexedAtt); err != nil {
+		logging.AttestationLoggerInstance.Failure(ctx, err.Error(), a.GetData().Slot+1)
 		return err
 	}
 
@@ -98,6 +108,8 @@ func (s *Service) OnAttestation(ctx context.Context, a ethpb.Att, disparity time
 
 	// Update forkchoice store with the new attestation for updating weight.
 	s.cfg.ForkChoiceStore.ProcessAttestation(ctx, indexedAtt.GetAttestingIndices(), bytesutil.ToBytes32(a.GetData().BeaconBlockRoot), a.GetData().Target.Epoch)
+
+	logging.AttestationLoggerInstance.Success(ctx, a.GetData().Slot+1)
 
 	return nil
 }

@@ -1,12 +1,14 @@
 package blockchain
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/blocks"
+	"github.com/prysmaticlabs/prysm/v5/beacon-chain/logging"
 	"github.com/prysmaticlabs/prysm/v5/config/params"
 	consensus_types "github.com/prysmaticlabs/prysm/v5/consensus-types"
 	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
@@ -107,6 +109,9 @@ func logBlockSyncStatus(block interfaces.ReadOnlyBeaconBlock, blockRoot [32]byte
 			"epoch":          slots.ToEpoch(block.Slot()),
 		}).Info("Synced new block")
 	}
+
+	logging.AttestationLoggerInstance.Summary(context.Background(), slots.ToEpoch(block.Slot()))
+
 	return nil
 }
 
